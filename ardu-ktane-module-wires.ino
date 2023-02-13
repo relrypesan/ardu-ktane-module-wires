@@ -2,10 +2,11 @@
   *   created by: Relry Pereira dos Santos
   */
 // #define DEBUG_MODE true
+#include <ArduUtil.h>
 #include <KtaneModule.h>
 
 #define F_CODE_NAME F("module-wires")
-#define F_VERSION F("v0.1.0-a1")
+#define F_VERSION F("v0.2.0-a1")
 
 KtaneModule module;
 
@@ -17,6 +18,14 @@ int interval = 1000;
 
 uint8_t pinsWires[] = { 6, 7, 8, 9, 10, 11 };
 volatile byte wiresInfo = 0x0;
+
+typedef struct ORDER_WIRES {
+  byte wire;
+  struct ORDER_WIRES *nextOrderWire;
+} OrderWires;
+
+OrderWires *orderWires = NULL, *currentOrderWires;
+unsigned long lastTimePrint = 0;
 
 void setup() {
   Serial.begin(38400);
@@ -38,19 +47,9 @@ void setup() {
 }
 
 void loop() {
-#ifdef DEBUG_MODE
-  delay(1000);
-
-  printSerialTracos();
-  for (int i = 0; i < sizeof(pinsWires); i++) {
-    Serial.println("pinsWires[" + (String)i + "]: " + digitalRead(pinsWires[i]));
-  }
-  printSerialTracos();
-#endif
-
   // Verifica se houve mensagem nova recebida pelo barramento I2C
   if (newMessage) {
-    switch (module.getRegModule()->status) {
+    switch (module.getStatus()) {
       case IN_GAME:
         Serial.println(F("Em jogo"));
         break;
@@ -61,30 +60,38 @@ void loop() {
     newMessage = false;
   }
 
-  // module.addFault("teste");
-
   // verifica se houve mudança no status do modulo
-  if (lastStatusModule != module.getRegModule()->status) {
+  if (lastStatusModule != module.getStatus()) {
     Serial.println((String)F("STATUS anterior: ") + Status_name[lastStatusModule]);
-    Serial.println((String)F("STATUS atual...: ") + Status_name[module.getRegModule()->status]);
+    Serial.println((String)F("STATUS atual...: ") + Status_name[module.getStatus()]);
 
-    switch (module.getRegModule()->status) {
+    switch (module.getStatus()) {
+      case RESETING:
+      case READY:
+        break;
       case IN_GAME:
         Serial.println(F("Iniciando o jogo e o contador."));
         break;
-      case RESETING:
+      case DEFUSED:
+        Serial.println(F("Modulo DEFUSADO!"));
         break;
     }
 
-    lastStatusModule = module.getRegModule()->status;
+    lastStatusModule = module.getStatus();
   }
 
-  switch (module.getRegModule()->status) {
+  switch (module.getStatus()) {
     case IN_GAME:
       executeInGame();
       break;
       // default:
-      //   Serial.println("module.getRegModule()->status: " + Status_name[module.getRegModule()->status]);
+      //   Serial.println("module.getStatus(): " + Status_name[module.getStatus()]);
+  }
+
+  unsigned long currentTimePrint = millis();
+  if (currentTimePrint - lastTimePrint > 2000) {
+    Serial.println((String)F("Memory free: ") + freeMemory());
+    lastTimePrint = currentTimePrint;
   }
 }
 
@@ -98,20 +105,75 @@ void executeInGame() {
       // Serial.println((String)F("Fio do pino: ") + pin + (String)F(", com valor: ") + value);
       bool dif = ((wiresInfo >> i) & 0b0001) ^ value;
       if (dif) {
-        Serial.println(F("Valores diferentes"));
         wiresInfo ^= (0b0001 << i);
-        module.addFault((String)F("Fio retirado errado: ") + (String)(i + 1));
+        if (validaRemovedWire(i)) {
+          Serial.println(F("Fio removido corretamente"));  
+        } else {
+          module.addFault((String)F("Fio errado: ") + (String)(i + 1));
+        }
       }
       i++;
     }
+
+    if (orderWires == NULL) {
+      module.defused();
+    }
     // Serial.print(F("wiresInfo: 0b"));Serial.println(wiresInfo, BIN);
     // printSerialTracos();
+
+    Serial.println((String)F("Memory free: ") + freeMemory());
     
     previousMillis = currentMillis;
   }
 }
 
+bool validaRemovedWire(byte numWire) {
+  currentOrderWires = orderWires;
+  
+  if (currentOrderWires != NULL) {
+    if (currentOrderWires->wire == numWire) {    
+      orderWires = orderWires->nextOrderWire;
+      free(currentOrderWires);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void resetGame() {
+  currentOrderWires = orderWires;
+  while (currentOrderWires != NULL) {
+    orderWires = orderWires->nextOrderWire;
+    Serial.println((String)F("Limpando orderWire: ") + currentOrderWires->wire);
+    free(currentOrderWires);
+    currentOrderWires = orderWires;
+  }
+
+  Serial.println(F("Criando nova ordem de desarme dos fios."));
+  byte numWires = random(2,7); // 2 to 6
+  Serial.println((String)F("numWires: ") + (String)numWires);
+  for (byte i = 0; i < numWires; i++) {
+    byte wireRandom = random(6);
+    if (orderWires == NULL) {
+      orderWires = currentOrderWires = (OrderWires*) malloc(sizeof(OrderWires));
+    } else {
+      currentOrderWires->nextOrderWire = (OrderWires*) malloc(sizeof(OrderWires));
+      currentOrderWires = currentOrderWires->nextOrderWire;
+    }
+    currentOrderWires->wire = wireRandom;
+    currentOrderWires->nextOrderWire = NULL;
+  }
+  
+  currentOrderWires = orderWires;
+  byte i = 0;
+  while(currentOrderWires != NULL) {
+    Serial.println((String)F("ordem [") + i + (String)F("] numero do fio: ") + currentOrderWires->wire);
+    currentOrderWires = currentOrderWires->nextOrderWire;
+    i++;
+  }
+
+  Serial.println(F("Reset realizado com sucesso!"));
 }
 
 bool validaModuloReady() {
