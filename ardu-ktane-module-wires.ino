@@ -5,10 +5,12 @@
 #include <ArduUtil.h>
 #include <KtaneModule.h>
 
+#define PINS_ADDRESS 2
+
 #define F_CODE_NAME F("module-wires")
 #define F_VERSION F("v0.2.0-a1")
 
-KtaneModule module;
+KtaneModule module = KtaneModule({PIN_ADDRESS_0, PIN_ADDRESS_1});
 
 volatile bool newMessage = false;
 
@@ -16,8 +18,11 @@ Status lastStatusModule;
 unsigned long previousMillis = 0;
 int interval = 1000;
 
+// blue, green, red, yellow, black, white
 uint8_t pinsWires[] = { 6, 7, 8, 9, 10, 11 };
+uint8_t pinsLeds[] = { A0, A1, A2, A3, 4, 5 };
 volatile byte wiresInfo = 0x0;
+volatile byte ledsInfo = 0x0;
 
 typedef struct ORDER_WIRES {
   byte wire;
@@ -30,8 +35,15 @@ unsigned long lastTimePrint = 0;
 void setup() {
   Serial.begin(38400);
 
+  randomSeed(analogRead(A7));
+
   for (int i = 0; i < sizeof(pinsWires); i++) {
-    pinMode(pinsWires[i], INPUT_PULLUP);
+    pinMode(pinsWires[i], INPUT);
+  }
+
+  for (int i = 0; i < sizeof(pinsLeds); i++) {
+    pinMode(pinsLeds[i], OUTPUT);
+    digitalWrite(pinsLeds[i], HIGH);
   }
 
   delay(1000);
@@ -70,7 +82,12 @@ void loop() {
       case READY:
         break;
       case IN_GAME:
-        Serial.println(F("Iniciando o jogo e o contador."));
+        Serial.println(F("Iniciando o jogo e os leds."));
+        for (byte bit = 0; bit < 6; bit++) {
+          bool valorBit = bitRead(ledsInfo, bit);
+          digitalWrite(pinsLeds[bit], valorBit);
+        }
+        Serial.print(F("Valor: ")); Serial.println(ledsInfo, BIN);
         break;
       case DEFUSED:
         Serial.println(F("Modulo DEFUSADO!"));
@@ -143,6 +160,19 @@ bool validaRemovedWire(byte numWire) {
 
 void resetGame() {
   currentOrderWires = orderWires;
+  wiresInfo = 0x0;
+  ledsInfo = 0x0;
+
+  for (byte pinLed : pinsLeds) {
+    digitalWrite(pinLed, HIGH);
+  }
+
+  for (byte bit = 0; bit < 6; bit++) {
+    bool bitValue = random(2) % 2;
+    bitWrite(ledsInfo, bit, bitValue);
+  }
+  Serial.print("Valor: "); Serial.println(ledsInfo, BIN);
+
   while (currentOrderWires != NULL) {
     orderWires = orderWires->nextOrderWire;
     Serial.println((String)F("Limpando orderWire: ") + currentOrderWires->wire);
@@ -171,6 +201,11 @@ void resetGame() {
     Serial.println((String)F("ordem [") + i + (String)F("] numero do fio: ") + currentOrderWires->wire);
     currentOrderWires = currentOrderWires->nextOrderWire;
     i++;
+  }
+
+  delay(300);
+  for (byte pinLed : pinsLeds) {
+    digitalWrite(pinLed, LOW);
   }
 
   Serial.println(F("Reset realizado com sucesso!"));
